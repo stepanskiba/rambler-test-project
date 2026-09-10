@@ -24,7 +24,6 @@ for df in (train_full, test):
     df["toxic"] = (df["label"] == 0).astype(int)
     df["text"] = df["text"].fillna("")
 
-# valid отрезаем от train: пороги подбираются на нём, test остаётся нетронутым
 train, valid = train_test_split(
     train_full, test_size=0.2, random_state=RANDOM_STATE, stratify=train_full["toxic"]
 )
