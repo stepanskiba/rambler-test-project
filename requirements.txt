@@ -1,5 +1,5 @@
 joblib~=1.6.0
-datasets~=5.0.1
 scikit-learn~=1.7.2
 fastapi~=0.141.1
 uvicorn[standard]~=0.52.4
+python-dotenv~=1.2.3

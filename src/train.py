@@ -5,35 +5,45 @@ from datasets import load_dataset
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
 MODEL_PATH = Path("models/model.joblib")
+VALID_PATH = Path("data/valid.jsonl")
 TEST_PATH = Path("data/test.jsonl")
+RANDOM_STATE = 42
 
 MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 TEST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 ds = load_dataset("Mnwa/russian-toxic")
-train, test = ds["train"].to_pandas(), ds["test"].to_pandas()
+train_full, test = ds["train"].to_pandas(), ds["test"].to_pandas()
 
-# label=0 -> токсичный, label=1 -> нормальный; хотим 1 = токсичный
-X_train, y_train = train["text"].fillna(""), (train["label"] == 0).astype(int)
-X_test, y_test = test["text"].fillna(""), (test["label"] == 0).astype(int)
+# label=0 -> токсичный, label=1 -> нормальный; дальше везде toxic: 1 = токсичный
+for df in (train_full, test):
+    df["toxic"] = (df["label"] == 0).astype(int)
+    df["text"] = df["text"].fillna("")
+
+# valid отрезаем от train: пороги подбираются на нём, test остаётся нетронутым
+train, valid = train_test_split(
+    train_full, test_size=0.2, random_state=RANDOM_STATE, stratify=train_full["toxic"]
+)
 
 model = Pipeline([
     ("tfidf", TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), min_df=3, max_features=300_000)),
     ("clf", LogisticRegression(max_iter=1000, class_weight="balanced", verbose=1)),
 ])
-model.fit(X_train, y_train)
+model.fit(train["text"], train["toxic"])
 
 joblib.dump(model, MODEL_PATH)
 
-test[["text", "label"]].to_json(TEST_PATH, orient="records", lines=True, force_ascii=False)
+valid[["text", "toxic"]].to_json(VALID_PATH, orient="records", lines=True, force_ascii=False)
+test[["text", "toxic"]].to_json(TEST_PATH, orient="records", lines=True, force_ascii=False)
 
-pred = model.predict(X_test)
-proba = model.predict_proba(X_test)[:, 1]
+pred = model.predict(test["text"])
+proba = model.predict_proba(test["text"])[:, 1]
 
-print(f"precision: {precision_score(y_test, pred):.4f}")
-print(f"recall: {recall_score(y_test, pred):.4f}")
-print(f"f1: {f1_score(y_test, pred):.4f}")
-print(f"roc_auc: {roc_auc_score(y_test, proba):.4f}")
+print(f"precision: {precision_score(test['toxic'], pred):.4f}")
+print(f"recall: {recall_score(test['toxic'], pred):.4f}")
+print(f"f1: {f1_score(test['toxic'], pred):.4f}")
+print(f"roc_auc: {roc_auc_score(test['toxic'], proba):.4f}")

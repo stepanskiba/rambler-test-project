@@ -1,40 +1,69 @@
+import argparse
 import json
+import os
 from pathlib import Path
 
 import joblib
 import pandas as pd
-from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+from dotenv import load_dotenv
+from sklearn.metrics import roc_auc_score
 
-MODEL_PATH = Path("models/model.joblib")
-TEST_PATH = Path("data/test.jsonl")
-METRICS_PATH = Path("data/metrics.json")
+load_dotenv()
 
-ALLOW_BELOW, BLOCK_ABOVE = 0.3, 0.8
+ALLOW_BELOW = float(os.getenv("ALLOW_BELOW", "0.3"))
+BLOCK_ABOVE = float(os.getenv("BLOCK_ABOVE", "0.8"))
 
-model = joblib.load(MODEL_PATH)
 
-test = pd.read_json(TEST_PATH, lines=True)
-X_test, y_test = test["text"].fillna(""), (test["label"] == 0).astype(int)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-path", type=Path, default=Path("models/model.joblib"))
+    parser.add_argument("--test-path", type=Path, default=Path("data/test.jsonl"))
+    parser.add_argument("--metrics-path", type=Path, default=Path("data/metrics.json"))
+    parser.add_argument("--prior", type=float, default=0.05)
+    return parser.parse_args()
 
-proba = model.predict_proba(X_test)[:, 1]
-pred = (proba >= 0.5).astype(int)
 
-allow = int((proba < ALLOW_BELOW).sum())
-block = int((proba >= BLOCK_ABOVE).sum())
-review = len(proba) - allow - block
+def main() -> None:
+    args = parse_args()
+    pi = args.prior
 
-metrics = {
-    "n_samples": len(y_test),
-    "precision": round(precision_score(y_test, pred), 4),
-    "recall": round(recall_score(y_test, pred), 4),
-    "f1": round(f1_score(y_test, pred), 4),
-    "roc_auc": round(roc_auc_score(y_test, proba), 4),
-    "zones": {
-        "ALLOW": round(allow / len(proba), 4),
-        "REVIEW": round(review / len(proba), 4),
-        "BLOCK": round(block / len(proba), 4),
-    },
-}
+    model = joblib.load(args.model_path)
+    test = pd.read_json(args.test_path, lines=True)
 
-METRICS_PATH.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
-print(json.dumps(metrics, indent=2, ensure_ascii=False))
+    proba = model.predict_proba(test["text"].fillna(""))[:, 1]
+    p_toxic = proba[test["toxic"] == 1]
+    p_normal = proba[test["toxic"] == 0]
+
+    fnr = float((p_toxic < ALLOW_BELOW).mean())
+    tnr = float((p_normal < ALLOW_BELOW).mean())
+    tpr = float((p_toxic >= BLOCK_ABOVE).mean())
+    fpr = float((p_normal >= BLOCK_ABOVE).mean())
+
+    allow_share = fnr * pi + tnr * (1 - pi)
+    block_share = tpr * pi + fpr * (1 - pi)
+
+    metrics = {
+        "n_samples": len(test),
+        "positive_rate": round(float(test["toxic"].mean()), 4),
+        "assumed_prior": pi,
+        "roc_auc": round(roc_auc_score(test["toxic"], proba), 4),
+        "thresholds": {"allow_below": ALLOW_BELOW, "block_above": BLOCK_ABOVE},
+        "allow": {
+            "share": round(allow_share, 4),
+            "contamination": round(fnr * pi / allow_share, 4) if allow_share else 0.0,
+        },
+        "review": {"share": round(1 - allow_share - block_share, 4)},
+        "block": {
+            "share": round(block_share, 4),
+            "precision": round(tpr * pi / block_share, 4) if block_share else 0.0,
+            "recall": round(tpr, 4),
+            "fpr": round(fpr, 4),
+        },
+    }
+
+    args.metrics_path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(metrics, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
