@@ -1,13 +1,18 @@
 from typing import Annotated, Literal
-
 import joblib
 from fastapi import FastAPI
 from pydantic import BaseModel, StringConstraints
+import os
+from dotenv import load_dotenv
 
-model = joblib.load("models/model.joblib")
+load_dotenv()
+
+MODEL_PATH = os.getenv("MODEL_PATH", "models/model.joblib")
+ALLOW_BELOW = float(os.getenv("ALLOW_BELOW", "0.33"))
+BLOCK_ABOVE = float(os.getenv("BLOCK_ABOVE", "0.88"))
+
+model = joblib.load(MODEL_PATH)
 app = FastAPI()
-
-ALLOW_BELOW, BLOCK_ABOVE = 0.3, 0.8
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
 

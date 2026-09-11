@@ -10,8 +10,8 @@ from sklearn.metrics import roc_auc_score
 
 load_dotenv()
 
-ALLOW_BELOW = float(os.getenv("ALLOW_BELOW", "0.3"))
-BLOCK_ABOVE = float(os.getenv("BLOCK_ABOVE", "0.8"))
+ALLOW_BELOW = float(os.getenv("ALLOW_BELOW", "0.33"))
+BLOCK_ABOVE = float(os.getenv("BLOCK_ABOVE", "0.88"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -19,13 +19,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=Path, default=Path("models/model.joblib"))
     parser.add_argument("--test-path", type=Path, default=Path("data/test.jsonl"))
     parser.add_argument("--metrics-path", type=Path, default=Path("data/metrics.json"))
-    parser.add_argument("--prior", type=float, default=0.05)
+    parser.add_argument("--toxic-share", type=float, default=0.05, help="ожидаемая доля токсичных в потоке")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    pi = args.prior
+    t = args.toxic_share
 
     model = joblib.load(args.model_path)
     test = pd.read_json(args.test_path, lines=True)
@@ -34,30 +34,30 @@ def main() -> None:
     p_toxic = proba[test["toxic"] == 1]
     p_normal = proba[test["toxic"] == 0]
 
-    fnr = float((p_toxic < ALLOW_BELOW).mean())
-    tnr = float((p_normal < ALLOW_BELOW).mean())
-    tpr = float((p_toxic >= BLOCK_ABOVE).mean())
-    fpr = float((p_normal >= BLOCK_ABOVE).mean())
+    toxic_allowed = float((p_toxic < ALLOW_BELOW).mean())
+    normal_allowed = float((p_normal < ALLOW_BELOW).mean())
+    toxic_blocked = float((p_toxic >= BLOCK_ABOVE).mean())
+    normal_blocked = float((p_normal >= BLOCK_ABOVE).mean())
 
-    allow_share = fnr * pi + tnr * (1 - pi)
-    block_share = tpr * pi + fpr * (1 - pi)
+    allow = toxic_allowed * t + normal_allowed * (1 - t)
+    block = toxic_blocked * t + normal_blocked * (1 - t)
 
     metrics = {
         "n_samples": len(test),
-        "positive_rate": round(float(test["toxic"].mean()), 4),
-        "assumed_prior": pi,
+        "toxic_share_in_test": round(float(test["toxic"].mean()), 4),
+        "toxic_share": t,
         "roc_auc": round(roc_auc_score(test["toxic"], proba), 4),
         "thresholds": {"allow_below": ALLOW_BELOW, "block_above": BLOCK_ABOVE},
         "allow": {
-            "share": round(allow_share, 4),
-            "contamination": round(fnr * pi / allow_share, 4) if allow_share else 0.0,
+            "share": round(allow, 4),
+            "toxic_in_allow": round(toxic_allowed * t / allow, 4) if allow else 0.0,
         },
-        "review": {"share": round(1 - allow_share - block_share, 4)},
+        "review": {"share": round(1 - allow - block, 4)},
         "block": {
-            "share": round(block_share, 4),
-            "precision": round(tpr * pi / block_share, 4) if block_share else 0.0,
-            "recall": round(tpr, 4),
-            "fpr": round(fpr, 4),
+            "share": round(block, 4),
+            "precision": round(toxic_blocked * t / block, 4) if block else 0.0,
+            "recall": round(toxic_blocked, 4),
+            "fpr": round(normal_blocked, 4),
         },
     }
 

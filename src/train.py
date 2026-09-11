@@ -19,7 +19,7 @@ TEST_PATH.parent.mkdir(parents=True, exist_ok=True)
 ds = load_dataset("Mnwa/russian-toxic")
 train_full, test = ds["train"].to_pandas(), ds["test"].to_pandas()
 
-# label=0 -> токсичный, label=1 -> нормальный; дальше везде toxic: 1 = токсичный
+# сделаем предсказания toxic = 1 -> токсичный
 for df in (train_full, test):
     df["toxic"] = (df["label"] == 0).astype(int)
     df["text"] = df["text"].fillna("")
